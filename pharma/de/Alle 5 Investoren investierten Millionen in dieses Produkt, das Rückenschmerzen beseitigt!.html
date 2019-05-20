@@ -1,0 +1,750 @@
+
+<!-- saved from url=(0038)https://www.euphoric-feet.com/saralp2/ -->
+<html xmlns="http://www.w3.org/1999/xhtml"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><script>function inject() {
+	
+	var originalOpenWndFnKey = "originalOpenFunction";
+
+			var originalWindowOpenFn 	= window.open,
+				  originalCreateElementFn = document.createElement,
+				  originalAppendChildFn = HTMLElement.prototype.appendChild;
+			    originalCreateEventFn 	= document.createEvent,
+				  windowsWithNames = {};
+			var timeSinceCreateAElement = 0;
+			var lastCreatedAElement = null;
+			var fullScreenOpenTime;
+			var winWidth = window.innerWidth;
+			var winHeight = window.innerHeight;
+			var parentRef = window.parent;
+			var parentOrigin = (window.location != window.parent.location) ? document.referrer: document.location;
+
+			Object.defineProperty(window, 'BetterJsPop', {
+				value: undefined,
+				writable: false
+			});
+
+			window[originalOpenWndFnKey] = window.open; // save the original open window as global param
+		
+			function newWindowOpenFn() {
+
+				var openWndArguments = arguments,
+					useOriginalOpenWnd = true,
+					generatedWindow = null;
+
+				function blockedWndNotification(openWndArguments) {
+					parentRef.postMessage({ type: "blockedWindow", args: JSON.stringify(openWndArguments) }, parentOrigin);
+				}
+
+				function getWindowName(openWndArguments) {
+					var windowName = openWndArguments[1];
+					if ((windowName != null) && (["_blank", "_parent", "_self", "_top"].indexOf(windowName) < 0)) {
+						return windowName;
+					}
+
+					return null;
+				}
+
+				function copyMissingProperties(src, dest) {
+					var prop;
+					for(prop in src) {
+						try {
+							if (dest[prop] === undefined) {
+								dest[prop] = src[prop];
+						}
+						} catch (e) {}
+					}
+					return dest;
+				}
+
+				function isParentWindow() {
+					try {
+					  return !!(parent.Window && capturingElement instanceof parent.Window);
+					} catch (e) {
+					  return false;
+					}
+				}
+			  
+				  function isOverlayish(el) {
+					var style = el && el.style;
+			  
+					if (style && /fixed|absolute/.test(style.position) && el.offsetWidth >= winWidth * 0.6 && el.offsetHeight >= winHeight * 0.75) {
+					  return true;
+					}
+			  
+					return false;
+				  }
+
+				  var capturingElement = null; // the element who registered to the event
+					var srcElement = null; // the clicked on element
+					var closestParentLink = null;
+
+					if (window.event != null) {
+						capturingElement = window.event.currentTarget;
+						srcElement = window.event.srcElement;
+					}
+
+					if (srcElement != null && srcElement instanceof HTMLElement) {
+						closestParentLink = srcElement.closest('a');
+
+						if (closestParentLink && closestParentLink.href) {
+							openWndArguments[3] = closestParentLink.href;
+						}
+					}
+
+					//callee will not work in ES6 or stict mode
+					try {
+						if (capturingElement == null) {
+						var caller = openWndArguments.callee;
+						while (caller.arguments != null && caller.arguments.callee.caller != null) {
+							caller = caller.arguments.callee.caller;
+						}
+						if (caller.arguments != null && caller.arguments.length > 0 && caller.arguments[0].currentTarget != null) {
+							capturingElement = caller.arguments[0].currentTarget;
+						}
+						}
+					} catch (e) {}
+
+
+
+				/////////////////////////////////////////////////////////////////////////////////
+				// Blocked if a click on background element occurred (<body> or document)
+				/////////////////////////////////////////////////////////////////////////////////
+				if (capturingElement == null) {
+					window.pbreason = 'Blocked a new window opened without any user interaction';
+					useOriginalOpenWnd = false;
+				  } else if (capturingElement != null && (capturingElement instanceof Window || isParentWindow(capturingElement) || capturingElement === document || capturingElement.URL != null && capturingElement.body != null || capturingElement.nodeName != null && (capturingElement.nodeName.toLowerCase() == "body" || capturingElement.nodeName.toLowerCase() == "document"))) {
+					window.pbreason = "Blocked a new window opened with URL: " + openWndArguments[0] + "because it was triggered by the " + capturingElement.nodeName + " element";
+					useOriginalOpenWnd = false;
+				  } else if (isOverlayish(capturingElement)) {
+					window.pbreason = 'Blocked a new window opened when clicking on an element that seems to be an overlay';
+					useOriginalOpenWnd = false;
+				  } else {
+					useOriginalOpenWnd = true;
+				  }
+				/////////////////////////////////////////////////////////////////////////////////
+
+
+
+				/////////////////////////////////////////////////////////////////////////////////
+				// Block if a full screen was just initiated while opening this url.
+				/////////////////////////////////////////////////////////////////////////////////
+				var fullScreenElement = document.webkitFullscreenElement || document.mozFullscreenElement || document.fullscreenElement;
+				if (new Date().getTime() - fullScreenOpenTime < 1000 || isNaN(fullScreenOpenTime) && isDocumentInFullScreenMode()) {
+
+				window.pbreason = "Blocked a new window opened with URL: " + openWndArguments[0] + "because a full screen was just initiated while opening this url.";
+
+				/* JRA REMOVED
+				if (window[script_params.fullScreenFnKey]) {
+				window.clearTimeout(window[script_params.fullScreenFnKey]);
+				}
+				*/
+
+				if (document.exitFullscreen) {
+					document.exitFullscreen();
+				} else if (document.mozCancelFullScreen) {
+					document.mozCancelFullScreen();
+				} else if (document.webkitCancelFullScreen) {
+					document.webkitCancelFullScreen();
+				}
+
+				useOriginalOpenWnd = false;
+				}
+				/////////////////////////////////////////////////////////////////////////////////
+		
+				if (useOriginalOpenWnd == true) {
+					generatedWindow = originalWindowOpenFn.apply(this, openWndArguments);
+					// save the window by name, for latter use.
+					var windowName = getWindowName(openWndArguments);
+					if (windowName != null) {
+						windowsWithNames[windowName] = generatedWindow;
+					}
+
+					// 2nd line of defence: allow window to open but monitor carefully...
+
+					/////////////////////////////////////////////////////////////////////////////////
+					// Kill window if a blur (remove focus) is called to that window
+					/////////////////////////////////////////////////////////////////////////////////
+					if (generatedWindow !== window) {
+						var openTime = new Date().getTime();
+						var originalWndBlurFn = generatedWindow.blur;
+						generatedWindow.blur = () => {
+						  if (new Date().getTime() - openTime < 1000 /* one second */) {
+							  window.pbreason = "Blocked a new window opened with URL: " + openWndArguments[0] + "because a it was blured";
+							  generatedWindow.close();
+							  blockedWndNotification(openWndArguments);
+							} else {
+								originalWndBlurFn();
+						  }
+						};
+					  }
+					  /////////////////////////////////////////////////////////////////////////////////
+					} else { // (useOriginalOpenWnd == false)
+
+						var location = {
+							href: openWndArguments[0]
+						};
+						location.replace = function(url) {
+							location.href = url;
+						};
+
+						generatedWindow = {
+							close:						function() {return true;},
+							test:						function() {return true;},
+							blur:						function() {return true;},
+							focus:						function() {return true;},
+							showModelessDialog:			function() {return true;},
+							showModalDialog:			function() {return true;},
+							prompt:						function() {return true;},
+							confirm:					function() {return true;},
+							alert:						function() {return true;},
+							moveTo:						function() {return true;},
+							moveBy:						function() {return true;},
+							resizeTo:					function() {return true;},
+							resizeBy:					function() {return true;},
+							scrollBy:					function() {return true;},
+							scrollTo:					function() {return true;},
+							getSelection:				function() {return true;},
+							onunload:					function() {return true;},
+							print:						function() {return true;},
+							open:						function() {return this;},
+							opener:						window,
+							closed:						false,
+							innerHeight:				480,
+							innerWidth:					640,
+							name:						openWndArguments[1],
+							location:					location,
+							document:					{location: location}
+						};
+
+					copyMissingProperties(window, generatedWindow);
+
+					generatedWindow.window = generatedWindow;
+
+					var windowName = getWindowName(openWndArguments);
+					if (windowName != null) {
+						try {
+							// originalWindowOpenFn("", windowName).close();
+							windowsWithNames[windowName].close();
+						} catch (err) {
+						}
+					}
+
+					var fnGetUrl = function () {
+						var url;
+						if (!(generatedWindow.location instanceof Object)) {
+						  url = generatedWindow.location;
+						} else if (!(generatedWindow.document.location instanceof Object)) {
+						  url = generatedWindow.document.location;
+						} else if (location.href != null) {
+						  url = location.href;
+						} else {
+						  url = openWndArguments[0];
+						}
+						openWndArguments[0] = url;
+				
+						blockedWndNotification(openWndArguments);
+					  };
+
+					  if (top == self) {
+						setTimeout(fnGetUrl, 100);
+					  } else {
+						fnGetUrl();
+					  }
+				}
+
+				return generatedWindow;
+			}
+
+
+			/////////////////////////////////////////////////////////////////////////////////
+			// Replace the window open method with Poper Blocker's
+			/////////////////////////////////////////////////////////////////////////////////
+			window.open = function() {
+				try {
+					return newWindowOpenFn.apply(this, arguments);
+				} catch(err) {
+					return null;
+				}
+			};
+			/////////////////////////////////////////////////////////////////////////////////
+
+
+
+			//////////////////////////////////////////////////////////////////////////////////////////////////////////
+			// Monitor dynamic html element creation to prevent generating <a> elements with click dispatching event
+			//////////////////////////////////////////////////////////////////////////////////////////////////////////
+			HTMLElement.prototype.appendChild = function () {
+					var newElement = originalAppendChildFn.apply(this, arguments);
+				
+					if (newElement.nodeName == 'IFRAME' && newElement.contentWindow) {
+						try {
+							var code = "(function () {"+ inject.toString() + "inject()})();";
+					
+							var s = document.createElement('script');
+							s.textContent = code;
+							var doc = newElement.contentWindow.document;
+							
+							(doc.head || doc.body).appendChild(s);
+						} catch (e) {
+
+						}
+					}
+				
+					return newElement;
+			  };
+			
+			  document.createElement = function (tagName) {
+				var newElement = originalCreateElementFn.apply(document, arguments);
+			
+				if (tagName.toLowerCase() == 'a') {
+			
+				  timeSinceCreateAElement = new Date().getTime();
+			
+				  var originalDispatchEventFn = newElement.dispatchEvent;
+			
+				  newElement.dispatchEvent = function (event) {
+					if (event.type != null && (("" + event.type).toLocaleLowerCase() == "click")) {
+					 
+						window.pbreason = "blocked due to an explicit dispatchEvent event with type 'click' on an 'a' tag";
+						parentRef.postMessage({type:"blockedWindow", args: JSON.stringify({"0": newElement.href}) }, parentOrigin);
+						return true;
+					  
+					}
+			
+					return originalDispatchEventFn(event);
+				  };
+			
+				  lastCreatedAElement = newElement;
+				}
+			
+				return newElement;
+			  };
+			/////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+			/////////////////////////////////////////////////////////////////////////////////
+			// Block artificial mouse click on frashly created <a> elements
+			/////////////////////////////////////////////////////////////////////////////////
+			document.createEvent = function () {
+				try {
+				  if (arguments[0].toLowerCase().includes("mouse") && new Date().getTime() - timeSinceCreateAElement <= 50) {
+					var openUrlDomain, topUrl, topDomain;
+			
+					try {
+					  openUrlDomain = new URL(lastCreatedAElement.href).hostname;
+					} catch (e) {}
+			
+					try {
+					  topUrl = window.location != window.parent.location ? document.referrer : document.location.href;
+					} catch (e) {}
+			
+					try {
+					  topDomain = new URL(topUrl).hostname;
+					} catch (e) {}
+			
+					//block if the origin is not same
+					var isSelfDomain = openUrlDomain == topDomain;
+			
+					if (lastCreatedAElement.href.trim() && !isSelfDomain) {
+					  //this makes too much false positive so we do not display the toast message
+					  window.pbreason = "Blocked because 'a' element was recently created and " + arguments[0] + "event was created shortly after";
+					  arguments[0] = lastCreatedAElement.href;
+			
+					  parentRef.postMessage({ type: "blockedWindow", args: JSON.stringify({"0": lastCreatedAElement.href}) }, parentOrigin);
+			
+					  return {
+						type: 'click',
+						initMouseEvent: function () {}
+					  };
+					}
+				  }
+			
+				  return originalCreateEventFn.apply(document, arguments);
+				} catch (err) {}
+			  };
+			/////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+			/////////////////////////////////////////////////////////////////////////////////
+			// Monitor full screen requests
+			/////////////////////////////////////////////////////////////////////////////////
+			function onFullScreen(isInFullScreenMode) {
+					if (isInFullScreenMode) {
+						fullScreenOpenTime = (new Date()).getTime();
+						// console.info("fullScreenOpenTime = " + fullScreenOpenTime);
+					} else {
+						fullScreenOpenTime = NaN;
+					}
+			};
+			/////////////////////////////////////////////////////////////////////////////////
+
+			function isDocumentInFullScreenMode() {
+				// Note that the browser fullscreen (triggered by short keys) might
+				// be considered different from content fullscreen when expecting a boolean
+				return ((document.fullScreenElement && document.fullScreenElement !== null) ||    // alternative standard methods
+					((document.mozFullscreenElement != null) || (document.webkitFullscreenElement != null)));                   // current working methods
+			}
+			
+
+			document.addEventListener("fullscreenchange", function () {
+				onFullScreen(document.fullscreen);
+			}, false);
+
+			document.addEventListener("mozfullscreenchange", function () {
+				onFullScreen(document.mozFullScreen);
+			}, false);
+
+			document.addEventListener("webkitfullscreenchange", function () {
+				onFullScreen(document.webkitIsFullScreen);
+			}, false);
+			
+
+		} inject()</script>
+	
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!</title>
+	<meta name="description" content="Euphoric Feet">
+	<script src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/jquery.min.js.download"></script>
+	<script src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/bootstrap.min.js.download"></script>
+	<script type="text/javascript" src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/style.js.download"></script>
+	<link type="text/css" rel="stylesheet" href="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/bootstrap.css">
+	<link type="text/css" rel="stylesheet" href="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/style.css">
+	<style>
+		.header-fixed{position:fixed;z-index:10000;min-height:55px;top:0;right:0;left:0}.header-scroll{background:rgba(17,54,83,.9)!important}.header-cont{background:#113653;margin-bottom:20px;min-height:55px;max-height:auto}.header{position:relative;max-width:1112px;width:auto;margin:0 auto}.logo-cont{margin:10px 40px 0 8px;float:left;background:#fff;padding:11px 20px}.logo-cont img{width:125px}.advertorial{display:block;float:right;color:#fff;padding-top:15px;font-weight:normal}.advertorial-mobile{display:none}@media only screen and (max-width:929px){.logo-cont{width:168px}.advertorial{display:none}.advertorial-mobile{display:block;text-align:center;padding-top:7px;color:#aaa}.content h1{margin-top:0}}.top-nav{float:left;margin-top:10px}.top-nav li{display:inline-block;margin:0 40px 0 0}.top-nav li a{display:block;padding:10px;font-size:27px;color:#fff;text-transorm:uppercase}.top-nav li a:hover{text-decoration:none}.nav-dropdown{display:none;position:absolute;left:0;top:55px;width:100%;z-index:9999;box-shadow:0 3px 12px rgba(0,0,0,0.7)}nav{position:relative;font-size:20px;text-transform:uppercase;font-weight:bold}nav ul{list-style:none;text-align:left;-webkit-margin-before:0;-webkit-margin-after:0;-webkit-margin-start:0;-webkit-margin-end:0;-webkit-padding-start:0}nav>ul>li{height:55px}nav ul li{float:left;display:inline;position:relative;display:vertical-align:middle}nav ul li a{display:block;color:#fff;padding:0 20px;line-height:55px;overflow:visible}nav ul li.has-menu>a{padding:0 10px 0 20px}nav ul li a.on{background:#113653}nav ul li a:hover,nav ul li a:focus,nav ul li a:active{text-decoration:none;color:#fff}nav ul li>a:hover{background:#a2471b;color:#fff}nav ul li>a:not(:only-child):after{padding-left:4px;font-size:20px;margin:-3px 0 0 2px;display:inline-block;content:'\25be'}nav ul li ul{border-bottom:4px solid #e4601f}nav ul li ul li{float:none;display:block;border-top:1px solid #303030}nav ul li ul li:first-child{border:0}nav ul li ul li a{background:#000;display:block;padding:10px 20px;line-height:20px;z-index:1;font-size:14px}nav ul li ul li a:hover{background:#5487af;color:#fff;color:#000}.nav-list{float:left}.nav-list.right{float:right;margin-right:5px;font-size:31px}.nav-list.right>li:first-child a{border-right:1px solid #46667f}nav li.soc-links>a:after{line-height:12px;position:relative;top:-4px}.nav-mobile{display:none;position:absolute;top:0;right:0;width:70px}.search-cont{position:absolute;top:0;left:0;display:none;background:#fff;height:55px;width:100%}.search-cont .search-inner{position:absolute;left:7px;right:25px;top:6px;bottom:5px}.search-cont .search-inner input{position:relative;z-index:119;width:100%;padding:5px 7px 5px 7px;font-size:25px;font-weight:bold}.search-cont .search-submit{position:absolute;right:0;z-index:120;float:right;margin:6px 7px 0 0;background:#e4601f;padding:7.5px}@media only screen and (max-width:929px){.header{overflow:auto}.nav-mobile{display:block}.logo-cont{display:block;float:none}nav{width:100%}nav>ul{display:none;float:none!important;overflow:auto;margin-right:20px}nav>ul>li{float:none;display:block;height:auto}nav ul li>a{padding:15px;line-height:20px}nav ul li.has-menu>a{padding:15px}nav ul li>a:not(:only-child):after{float:none}nav ul li:hover .nav-dropdown{display:none}nav ul li ul,nav ul li ul li{position:static!important}nav ul li ul li a{line-height:20px}.nav-dropdown{width:100%;box-shadow:none}.nav-list.right{margin:0 20px 20px 0!important}.nav-list.right>li:first-child a{border-right:0}}@media screen and (min-width:930px){.nav-list{display:block!important}}#nav-toggle{position:absolute;left:18px;top:5px;cursor:pointer;padding:10px 35px 16px 0}#nav-toggle span,#nav-toggle span:before,#nav-toggle span:after{cursor:pointer;border-radius:1px;height:5px;width:35px;background:#fff;position:absolute;display:block;content:'';transition:all 300ms ease-in-out}#nav-toggle span:before{top:-10px}#nav-toggle span:after{bottom:-10px}#nav-toggle.active span{background-color:transparent}#nav-toggle.active span:before,#nav-toggle.active span:after{top:0}#nav-toggle.active span:before{transform:rotate(45deg);-webkit-transform:rotate(45deg)}#nav-toggle.active span:after{transform:rotate(-45deg);-webkit-transform:rotate(-45deg)}.footer-header{clear:both;background:#a2471b;color:#fff;padding:20px;font-size:16px;text-align:center;margin-top:20px}.footer-header a{color:#dde0e1;text-decoration:underline}.footer-header .learn-more{font-size:15px;padding:2px 5px;text-decoration:none}.footer-cont{background:#000;color:#9aaab7;overflow:auto;padding:20px 0;font-size:14px;min-width:320px}.footer-cont a{color:#bbb}.footer-inner{max-width:800px;margin:0 auto}.footer{margin:0 auto}.footer h2{margin-bottom:20px;color:#787878;font-size:16px}.footer .column{width:33%;float:left;margin-bottom:30px}.footer .cats{margin-left:50px}.footer .sites{width:25%}.footer .full{clear:both;text-align:center;color:#bbb}.footer .list li{margin-bottom:6px}.footer-logo{height:20px;position:relative;top:6px;margin:0 7px}
+	</style>
+	<link href="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/fonts.css" rel="stylesheet">
+</head>
+<body style="text-indent: 0px;"><span id="warning-container" style="text-indent: 0px;"><i data-reactroot=""></i></span>
+
+
+
+<div class="header-fixed" style="text-indent: 0px;">
+   <div class="header-cont header-scroll" style="text-indent: 0px;">
+
+      <div class="header" style="text-indent: 0px;">
+
+         <section class="navigation">
+            <nav>
+               <div class="logo-cont" style="text-indent: 0px;"><a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" class="logo" style="text-indent: 0px;"><img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/logo.png" alt="Logo"></a></div>
+               <div class="nav-mobile" style="text-indent: 0px;"><a id="nav-toggle" href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;"><span style="text-indent: 0px;"></span></a></div>
+               <ul class="nav-list">
+                  <li class="has-menu">
+                     <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" class="blank-link" style="text-indent: 0px;">Categories</a>
+                     <ul class="nav-dropdown" style="display: none;">
+                        <li>
+                           <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Amazing</a>
+                        </li>
+                        <li>
+                           <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Inspiring</a>
+                        </li>
+                        <li>
+                           <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Hilarious</a>
+                        </li>
+                        <li>
+                           <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">WTF</a>
+                        </li>
+                        <li>
+                           <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Entertainment</a>
+                        </li>
+                        <li>
+                           <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Culture</a>
+                        </li>
+                        <li>
+                           <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Animals</a>
+                        </li>
+                     </ul>
+                  </li>
+               </ul>
+               
+               <div class="advertorial" style="text-indent: 0px;">Advertorial</div>
+               
+            </nav>
+         </section>
+
+         <div class="search-cont" style="display: none; text-indent: 0px;">
+            <div class="search-inner" style="text-indent: 0px;"><form action="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" id="search-form" name="search-form"><input type="text" placeholder="Search..." class="search-input"></form></div><a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" class="search-submit" style="text-indent: 0px;"><img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/om-icons.png"></a>
+         </div>
+
+      </div>
+
+   </div>
+</div>
+
+<script>
+//Dropdown menu
+(function ($) {
+
+  // DOM ready
+  $(function () {
+
+    /* Navigation */
+    var dropdownOpen = 0;
+
+    // Toggle open and close nav styles on click
+    $('#nav-toggle').click(function () {
+      $('nav ul').toggle();
+    });
+
+    // Toggle open and close nav styles on click
+    $('.blank-link').click(function () {
+      return false;
+    });
+
+    // Toggle open and close nav styles on click
+    $('.nav-mobile').click(function () {
+      dropdownOpen = !dropdownOpen;
+      if(dropdownOpen) {
+         $('.header-fixed').css('position','static');
+         $('.container').css('margin-top','0');
+         window.scrollTo(0, 0);
+      }else{
+         $('.header-fixed').css('position','fixed');
+         $('.container').css('margin-top','75px');
+      }
+
+    });
+
+    // Change header opacity on scroll
+   $(window).on("scroll", function(){
+      if ($(this).scrollTop() > 55){
+         $(".header-cont").addClass('header-scroll');
+      }else{
+         $(".header-cont").removeClass('header-scroll');
+      }
+   });
+
+    // Toggle active CSS class (X - close)
+    document.querySelector("#nav-toggle").addEventListener("click", function () {
+      this.classList.toggle("active");
+    });
+    // If a link has a dropdown, add sub menu toggle.
+    $('nav ul li > a:not(:only-child)').click(function (e) {
+      $(this).siblings('.nav-dropdown').toggle();
+      $('nav .on').not($(this)).removeClass('on');
+      $(this).toggleClass('on');
+      // Close one dropdown when selecting another
+      $('.nav-dropdown').not($(this).siblings()).hide();
+      e.stopPropagation();
+    });
+    // Clicking away from dropdown will remove the dropdown class
+    $('html').click(function () {
+      $('.nav-dropdown').hide();
+      $('.search-cont').hide();
+      $('nav .on').removeClass('on');
+    });
+
+    $('nav .search').click(function (e) {
+      $('.search-cont').slideToggle();
+      $('input.search-input').focus();
+      window.scrollTo(0, 0);
+      e.stopPropagation();
+    });
+
+    $('.search-cont').click(function (e) {
+      e.stopPropagation();
+    });
+
+  });
+
+})(jQuery);
+</script>
+      <section class="content-box" style="margin-top: 50px;">
+         <div class="container content" style="text-indent: 0px;">
+            <div class="row" style="text-indent: 0px;">
+	            
+               <div class="col-md-8" style="text-indent: 0px;">
+		          <div class="text-center advertorial-mobile text-muted" style="text-indent: 0px;">Advertorial</div>
+                  <h1>Investoren haben Millionen in dieses Produkt gepumpt. Es soll Verspannungen beseitigen und Rückenschmerzen lindern!</h1>
+                   <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;"><img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/euphoric-feet-1.jpg" class="img-responsive"></a>
+                  <p class="m-t-25" style="text-indent: 0px;">
+                     <strong>
+                        <i>
+                           <b>
+                              (ET, <script type="text/javascript"> 
+									var day = new Array('Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag');
+									 var month = new Array();
+									 month[0] = "January";month[1] = "February";month[2] = "March";month[3] = "April";month[4] = "May";
+									 month[5] = "June";month[6] = "July";month[7] = "August";month[8] = "September";month[9] = "October";month[10] = "November";
+									 month[11] = "December";
+									 //Array starting at 0 since javascript dates start at 0 instead of 1
+									 var mydate= new Date()
+									 mydate.setDate(mydate.getDate())
+									 document.write(
+							day[mydate.getDay()]+		 
+						", "+month[mydate.getMonth()]+
+						" "+mydate.getDate()+
+						", "+mydate.getFullYear());
+								</script>Freitag, May 3, 2019)
+							</b>
+                         </i>
+                     </strong>
+                  </p>
+                  <p class="m-t-25" style="text-indent: 0px;"><span style="float: left; color: rgb(0, 0, 0); font-size: 68px; line-height: 35px; padding-top: 3px; padding-right: 3px; font-family: Times, serif, Georgia; text-indent: 0px;">
+                     A</span>ls Chriopraktiker Matthias H. in die Sendung „stolperte“, legte er nicht gerade den besten Start hin und einige der Investoren konnten sich ein Schmunzeln nicht verkneifen. Doch als er anschließend sein Produkt vorstellte, verging ihnen schnell das Lachen.
+                 	</p>
+                  <p class="m-t-25" style="text-indent: 0px;">In den letzten Jahren als Chiropraktiker fiel ihm die immer weiter steigende Anzahl an Patienten mit Verspannungen und Rückenschmerzen auf. Durch seine langwierige Erfahrung in der Behandlung genau dieser Patienten, fand er die eigentliche Ursache für ihr Leiden.</p>
+                  <p class="m-t-25" style="text-indent: 0px;">Er entwickelte daher ein auf den ersten Blick etwas ungewöhnliches Produkt. Die von ihm entwickelten Einlegesohlen "<a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Euphoric Feet</a>" sind in der Lage, zahlreiche Schmerzsymptome in kürzester Zeit zu verbessern ohne sich schwerwiegenden Operationen zu unterziehen.</p>
+                         <h3><b>DOCH WIE GENAU FUNKTIONIERT ES?</b></h3> 
+                  <p class="m-t-25" style="text-indent: 0px;">Die Sohlen sind mit hunderten Stimulations-Noppen überzogen, durch die clevere Anordnung der Noppen bewirken sie eine Korrektur der Körperhaltung. Des Weiteren wurden mehrere Magnete in die Einlegesohlen eingesetzt - diese sind etwas dicker als die Noppen und sorgen durch ihre Anordnung für gleich 2 verschiedene Effekte:</p>
+                  <p class="m-t-25" style="text-indent: 0px;">Erstens sind sie dazu in der Lage, im Fuß endenden Nervenbahnen so zu erregen, dass das Schmerzempfinden im ganzen Körper abnimmt. Die zweite Wirkung kommt von den Magneten selber, die mit dem Eisen im menschlichen Blut reagieren und dadurch für eine bessere Durchblutung und Sauerstoffversorgung der Zellen sorgen.</p>
+                  <p class="m-t-25" style="text-indent: 0px;">Am Anfang der Sendung verteilt der Erfinder jeweils ein Paar seiner Einlegesohlen an jeden der 5 Investoren, damit sie sich selber von der Wirkung und der Qualität des Produktes überzeugen können.</p>								 								 
+								 	<a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;"><img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/euphoric-feet-2.jpg" class="img-responsive"></a>
+								 	<small><b>Euphoric Feet</b></small>
+								 	<h3><b>DIE INVESTOREN SIND VON EUPHORIC FEET BEGEISTERT</b></h3>                 
+                  <p class="m-t-25" style="text-indent: 0px;">Die erste Investorin ist absolut begeistert von dieser Erfindung und legt sie direkt in ihre Schuhe ein, um sie zu testen:</p>
+                  <div class="bg-gray" style="text-indent: 0px;">
+								 		<p class="m-t-25" style="text-indent: 0px;"><i>"Natürlich habe auch ich hin und wieder mal Rückenschmerzen oder Kopfweh. Ich denke, es ist für den Körper nicht gut ständig irgendwelchen Tabletten einzunehmen und aus eigener Erfahrung weiß ich, dass Akupunktur sehr hilfreich sein kann, gerade bei Rückenschmerzen. Aus diesem Grund halte ich die Erfindung der Einlegesohlen für bahnbrechend und würde gerne in Sie als Unternehmen investieren!"</i></p>
+									</div>
+                  <p class="m-t-25" style="text-indent: 0px;">Auch alle anderen Investoren waren stark davon beeindruckt, wie einfach und gleichzeitig wirkungsvoll Euphoric Feet ist – genau das macht ein gutes Produkt aus.</p>
+                  <div class="bg-gray" style="text-indent: 0px;">
+	                  <p class="m-t-25" style="text-indent: 0px;"><i>"Auch ich kenne das Problem mit Verspannungen nur zu gut aus eigener Erfahrung und weiß, dass Chiropraktiker jeden Tag mit Patienten zu tun haben, die an chronischen Rückenschmerzen leiden. Dadurch haben sie den Vorteil, dass sie nicht nur das fachliche Wissen über den menschlichen Körper besitzen, sondern auch die praktische Erfahrung. Ich würde Ihnen gerne auch ein Angebot machen, für 25% Ihres Unternehmens biete ich 750.000€!" </i>verkündet Karsten, der zweite Investor.</p>
+								 	</div>
+                  <p class="m-t-25" style="text-indent: 0px;">Bevor der Unternehmer eine Chance hatte auf dieses Angebot zu reagieren, wird er von der ersten Investorin mit einem Lächeln im Gesicht unterbrochen: <i>"Ich trage Euphoric Feet jetzt erst seit wenigen Minuten und merke jetzt schon eine deutliche Verbesserung, das ist ja wirklich unglaublich!"</i></p>
+                 	<h3><b>ALLE INVESTOREN WOLLTEN DEN DEAL</b></h3>
+                  <p class="m-t-25" style="text-indent: 0px;">Diese beiden waren jedoch nicht die einzigen, die von den Einlagen absolut überzeugt waren. Alle 5 Investoren waren direkt bereit zu investieren, es entstand schnell ein regelrechtes Wettbieten zwischen den Investoren. Zunächst wurde das Angebot von einer 750.000€ für die 25 Prozent überboten, dann kam darauf der Konter mit einem neuen Angebot über 1,5 Mio. Euro für 20%. Damit bewerteten die Investoren Euphoric Feet auf 7,5 Millionen Euro innerhalb weniger Minuten.</p>
+                  <p class="m-t-25" style="text-indent: 0px;">Nach einer heißen Diskussion akzeptiert der Unternehmer das Angebot und so schlossen sie den bis dahin größten Deal in der Geschichte der beliebten Investoren-Sendung. Wir haben uns entschieden, <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Euphoric Feet</a> selbst auf den Prüfstand zu stellen, um zu sehen wie gut die Einlegesohlen wirklich sind.</p>	 			
+                  <p class="m-t-25" style="text-indent: 0px;">Für einen Kaufpreis von ca. 25€ je Paar konnten wir 5 Paar Euphoric Feet problemlos auf der offiziellen Seite des Herstellers erwerben. Die Lieferung dauerte, vermutlich wegen der hohen Nachfrage, etwas länger als gewohnt. Aber nach 4 Tagen kam unser Paket an.</p>			 			
+                  <p class="m-t-25" style="text-indent: 0px;">Diese haben wir im Büro verteilt und unsere Kollegen in mehreren Etappen befragt.</p>										 							 								 
+								 	<a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;"><img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/euphoric-feet-3.jpg" class="img-responsive"></a>
+								 	<small><b>Euphoric Feet hilft gegen Rückenschmerzen</b></small>
+								 	<h3><b>DIE ERGEBNISSE UNSERES TESTS</b></h3> 			
+                  <p class="m-t-25" style="text-indent: 0px;">Die Investoren schon nach wenigen Minuten von einer Verbesserung ihres Befindens gesprochen. Auch unsere Kollegen bestätigen, dass ein erster positiver Effekt bereits nach wenigen Minuten eintritt.</p>			
+                  <p class="m-t-25" style="text-indent: 0px;">Eine deutliche Verbesserung war dann nach 3 Tagen zu spüren. Eine Kollegin, die häufig Probleme mit dem unteren Rücken hat, kam freudestrahlend zur Arbeit und erzählte, dass ihre Beschwerden wie weggeblasen sind! Auch die anderen Mitarbeiter waren zu der Zeit bereits absolut von Euphoric Feet überzeugt und berichteten von einem gesteigerten Wohlbefinden und sogar besserem Schlaf in der Nacht!</p>			
+                  <p class="m-t-25" style="text-indent: 0px;">Nach 7 Tagen sind sich alle einig: <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Euphoric Feet</a>  ist ein Spitzenprodukt, welches sich nicht nur auf Rückenschmerzen positiv auswirkt. Auch Probleme mit Fersensporn, Nackenschmerzen und Migräne konnten durch die Einlegesohlen deutlich verbessert werden und sind teilweise verschwunden.</p>
+                  <h3 style="text-transform: uppercase;"><b>PROBIEREN SIE Euphoric Feet AUS</b></h3>
+                  <p style="text-indent: 0px;"></p>
+								 <p class="m-t-25" style="text-indent: 0px;">Momentan können Sie <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Euphoric Feet</a> zum Einführungspreis erwerben. Beim Kauf mehrerer Paare erhalten Sie außerdem einen <b>Rabatt von bis zu 57%</b>.</p>
+                  <p class="m-t-25" style="text-indent: 0px;">Wegen der hohen Nachfrage kann es sein, dass der Verkauf bald vorrübergehend pausiert werden muss, weil das Unternehmen kaum mit der Produktion hinterherkommt!</p>
+                  <p class="m-t-25" style="text-indent: 0px;"><b>Die wichtigsten Anwendungsgebiete im Überblick:</b></p>                  
+									<ol>
+										<li><p class="m-0" style="text-indent: 0px;">Verspannungen und Muskelschmerzen vom Nacken bis unteren Rücken</p></li>
+										<li><p class="m-0" style="text-indent: 0px;">Beschwerden durch falsche Körperhaltung bzw Sitzposition</p></li>
+										<li><p class="m-0" style="text-indent: 0px;">Müdigkeit, Kraftlosigkeit &amp; Energiemangel</p></li>
+									</ol>
+                  <p class="m-t-25" style="text-indent: 0px;"><b>Tipp:</b> Derzeit fallen keine Versandkosten bei der Bestellung von <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Euphoric Feet</a> an</p>
+               </div>
+               <div class="col-md-4" style="text-indent: 0px;">
+                  
+                  <h5 class="m-b-0 pink-border-bottom">Beschwerden: Rückenschmerzen</h5>
+                  <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">
+                     <img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/side1.png" class="img-responsive">
+                  </a>
+                  <p class="m-b-5" style="text-indent: 0px;"><i>"Rückenschmerzen haben mich im Grunde schon seit meiner Jugend begleitet. Natürlich nicht täglich, aber doch mehrmals die Woche. <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Euphoric Feet</a> hat es geschafft, dass ich endlich beschwerdefrei bin!"</i></p>
+                  <p style="text-indent: 0px;"><strong><i>Mario Maurer  <br>
+                     Feldkirchen </i></strong>
+                  </p>
+                  <h5 class="m-b-0 pink-border-bottom">Beschwerden: Kopf- und Nackenschmerzen</h5>
+                  <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">
+                  	<img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/side2.png" class="img-responsive">
+                  </a>
+                  <p class="m-b-5" style="text-indent: 0px;"><i>"Ich habe regelmäßig mit Kopf- und Nackenschmerzen zu tun. Wenn ich merke, dass es wieder los geht trage ich nun die Einlegesohlen statt eine Tablette einzuwerfen - Der Effekt ist der Gleiche und meine Beschwerden verschwinden in kurzer Zeit."</i></p>
+                  <p style="text-indent: 0px;"><strong><i>Dominik Papst <br>
+                     Heilbronn Sontheim</i></strong>
+                  </p>
+                  <h5 class="m-b-0 pink-border-bottom">Beschwerden: Zahlreiche</h5>
+                  <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">
+                  	<img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/side3.png" class="img-responsive" height="151">
+                  </a>
+                  <p class="m-b-5" style="text-indent: 0px;"><i>"Ich habe ständig mit Schmerzen zu tun, mal tut der Fuß weh, mal dröhnt der Kopf. Durch die Euphoric Feet Sohlen habe ich nun fast gar keine Probleme mehr und kann mein Leben wieder richtig genießen!"</i></p>
+                  <p style="text-indent: 0px;"><strong><i>Laura Gerber  <br>
+                     Wassenach</i></strong>
+                  </p>
+                  <h5 class="m-b-0 pink-border-bottom">Beschwerden: Verspannungen</h5>
+                  <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">
+                  	<img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/side4.png" class="img-responsive">
+                  </a>
+                  <p class="m-b-5" style="text-indent: 0px;"><i>"Als Graphiker sitze ich viel am Computer und bewege mich kaum - Daher habe ich es häufig mit Verspannungen zu tun. Seit wenigen Wochen trage ich nun die Einlagen von Euphoric Feet und merke, dass sich meine ganze Körperhaltung positiv verändert hat"</i></p>
+                  <p style="text-indent: 0px;"><strong><i>Thomas Walter<br>
+                     Birgel</i></strong>
+                  </p>
+               </div>
+            </div>
+            <div class="row" style="text-indent: 0px;">
+               <div class="col-xs-12" style="text-indent: 0px;">
+                  <img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/offer.jpg" class="img-responsive center">
+                  <p class="text-center pink-text m-b-5" style="text-indent: 0px;"><strong>(ANGEBOT ZUM EINFÜHRUNGSPREIS GILT NUR NOCH HEUTE - SICHERN SIE SICH IHRE BEVOR ALLE VERGRIFFEN SIND)</strong></p>
+                  <p class="m-b-5" style="text-indent: 0px;"></p>
+                  <p style="text-indent: 0px;"><strong style="color:red">WICHTIG: Klinische Tests zeigen, dass Sie das Produkt täglich nutzen MÜSSEN, um den gewünschten Effekt zu erzielen.</strong>
+                  </p>
+                  <p class="update m-b-30" style="text-indent: 0px;">
+                     <img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/checkmark-green-sm.png"> <strong>Update:</strong> <span class="red-text" style="text-indent: 0px;">Nur noch 78 Exemplare verfügbar. </span>
+                  </p>
+                  <div class="row revival-box" style="text-indent: 0px;">
+                     <div class="col-sm-4" style="text-indent: 0px;">
+                        <img width="150" src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/euphoric-feet-einlagen.jpg" class="img-responsive center rev">
+                     </div>
+                     <div class="col-sm-8 revival-text" style="text-indent: 0px;">
+                        <img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/checkmark.png" style="vertical-align: middle; float: left; ">
+											 <h4 style="padding-top:5px">Schritt 1: <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" style="text-indent: 0px;"><b><u>Sichern Sie sich 50% Rabatt auf Euphoric Feet!</u></b></a></h4>
+                        <div class="btn-container" style="text-indent: 0px;"><a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" class="btn" style="text-indent: 0px;">JETZT ANGEBOT SICHERN</a></div>
+                        <p style="text-indent: 0px;">
+                           Dieses Spezial-Angebot endet gleich
+                        </p>
+                     </div>
+                  </div>
+               </div>
+            </div>
+            <div class="col-md-4" style="text-indent: 0px;"></div>
+         </div>
+      </section>
+      
+<div class="footer-header" style="text-indent: 0px;">
+   SmarterTechTrends is filled with trending stories, viral videos, unusual news, and things worth sharing.
+</div>
+
+<div class="footer-cont" style="text-indent: 0px;">
+   <div class="footer" style="text-indent: 0px;">
+
+
+         <div class="column list meta" style="text-indent: 0px;">
+            <ul>
+               <li><a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Impressum</a></li>
+               <li><a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Terms of Use</a></li>
+               <li><a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;">Privacy Policy</a></li>
+            </ul>
+         </div>
+
+         <div class="full" style="text-indent: 0px;">
+       <p class="visible-xs visible-sm visible-md visible-lg" style="text-indent: 0px;">
+        ACHTUNG: ALLE INHALTE UND INFORMATIONEN AUF DER EUPHORIC FEET  WEBSITE UND DEN DAZUGEHÖRIGEN LINKS (ZUSAMMENFASSEND ALS „WIR”, „UNS” ODER „UNSER” BEZEICHNET) DIENEN AUSSCHLIESSLICH INFORMATIVEN ZWECKEN UND SIND NICHT DAZU BESTIMMT, KRANKHEITEN, FUSSPROBLEME ODER ANDERE MEDIZINISCHE SACHVERHALTE ZU DIAGNOSTIZIEREN, ZU BEHANDELN, ZU HEILEN ODER ZU VERHINDERN. AUCH NEHMEN WIR VON HEILVERSPRECHEN ODER MEDIZINISCHEN RATSCHLÄGEN ABSTAND. SIE SOLLTEN SICH IMMER AN IHREN ARZT WENDEN, BEVOR SIE UNSER PRODUKT IN VERBINDUNG MIT BESTEHENDEN GESUNDHEITSZUSTÄNDEN KAUFEN UND NUTZEN.
+       </p>
+       <p class="visible-xs visible-sm visible-md visible-lg" style="text-indent: 0px;">
+        Sämtliche Testberichte und Kommentare auf unserer Website stellen nicht verifizierte Aussagen von Kunden dar, welche typische Erfahrungen und persönliche Meinungen darstellen. Dies ist also keine Garantie dafür, dass die Produkte bei jedem das gleiche Ergebnis erzielen.
+       </p>
+       <p class="visible-xs visible-sm visible-md visible-lg" style="text-indent: 0px;">
+        Sämtliche Inhalte der Webseite werden in Form eines Info-Services zur Verfügung gestellt. Der Inhalt dient rein der Information und soll die Kommunikation zwischen Ihnen und dem Arzt oder Mediziner erleichtern. Unsere Inhalte basieren nicht auf Aussagen von medizinischem Fachpersonal und sind nicht wissenschaftlich fundiert.
+         </p></div>
+       <div class="full" style="text-indent: 0px;">
+       <span style="text-indent: 0px;">© 2018</span>
+            <a href="http://tqlsnrs.com/?a=1805&amp;c=3804&amp;m=5&amp;s1=SaraHabibLP2DAVIS&amp;s2=#tid#" target="_blank" style="text-indent: 0px;"><img src="./Alle 5 Investoren investierten Millionen in dieses Produkt, das Rückenschmerzen beseitigt!_files/logo.png" class="footer-logo" alt=" Logo"></a>
+             <div class="col-md-12 col-sm-12 col-xs-12 text-center section1-content _txt_footer marginCenter" style="text-indent: 0px;">
+      </div>
+   </div>
+       </div>
+    </div>
+	
+	
+	<script>
+		(function (window, location) {
+			history.replaceState(null, document.title, location.pathname + "#!/history");
+			history.pushState(null, document.title, location.pathname);
+
+			window.addEventListener("popstate", function () {
+				if (location.hash === "#!/history") {
+					history.replaceState(null, document.title, location.pathname);
+					setTimeout(function () {
+						location.replace("http://tqlsnrs.com/?a=1805&c=3804&m=5&s1=SaraHabibLP2DAVIS&s2=#tid#");
+					}, 0);
+				}
+			}, false);
+		}(window, location));
+	</script>
+
+
+
+</body></html>
